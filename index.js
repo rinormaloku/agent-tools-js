@@ -1,7 +1,9 @@
 /**
  * Currency Conversion Tool
- * This example tool converts amounts between different currencies
+ * This example tool converts amounts between different currencies using real exchange rates
  */
+
+const axios = require('axios');
 
 /**
  * Currency converter tool executor function
@@ -14,62 +16,58 @@ async function convertCurrencyExecutor({
   publishToClient,
 }) {
   try {
-    // Mock exchange rates (in a real tool, you would call an API)
-    const exchangeRates = {
-      USD: {
-        EUR: 0.93,
-        GBP: 0.79,
-        JPY: 151.72,
-        CAD: 1.38,
-        AUD: 1.52,
-        CHF: 0.89,
-        CNY: 7.21,
-        INR: 83.45,
-      },
-      EUR: {
-        USD: 1.08,
-        GBP: 0.85,
-        JPY: 163.85,
-        CAD: 1.49,
-        AUD: 1.64,
-        CHF: 0.96,
-        CNY: 7.79,
-        INR: 90.13,
-      },
-      GBP: {
-        USD: 1.27,
-        EUR: 1.17,
-        JPY: 191.90,
-        CAD: 1.74,
-        AUD: 1.92,
-        CHF: 1.13,
-        CNY: 9.12,
-        INR: 105.48,
-      }
-      // Additional rates would be included in a complete implementation
-    };
-
-    if (!exchangeRates[fromCurrency]) {
-      throw new Error(`Unsupported currency: ${fromCurrency}`);
+    // If you want to publish progress or updates to the client
+    if (publishToClient) {
+      publishToClient({
+        type: 'progress',
+        data: {
+          message: `Fetching current exchange rates...`,
+          progress: 25
+        }
+      });
     }
 
-    if (!exchangeRates[fromCurrency][toCurrency]) {
-      throw new Error(`Conversion from ${fromCurrency} to ${toCurrency} is not supported`);
+    // Fetch the latest exchange rates from the API
+    const response = await axios.get(`https://api.exchangerate-api.com/v4/latest/${fromCurrency}`);
+    const exchangeRateData = response.data;
+
+    // Check if the API returned data successfully
+    if (!exchangeRateData || !exchangeRateData.rates) {
+      throw new Error('Failed to fetch exchange rates');
     }
 
-    const rate = exchangeRates[fromCurrency][toCurrency];
+    // Check if the target currency is supported
+    if (!exchangeRateData.rates[toCurrency]) {
+      throw new Error(`Conversion to ${toCurrency} is not supported`);
+    }
+
+    // Get the exchange rate for the target currency
+    const rate = exchangeRateData.rates[toCurrency];
+
+    // If you want to publish progress updates
+    if (publishToClient) {
+      publishToClient({
+        type: 'progress',
+        data: {
+          message: `Converting ${amount} ${fromCurrency} to ${toCurrency}...`,
+          progress: 75
+        }
+      });
+    }
+
+    // Calculate the converted amount
     const convertedAmount = amount * rate;
 
     // Format the result to 2 decimal places
     const formattedAmount = parseFloat(convertedAmount.toFixed(2));
 
-    // If you want to publish progress or updates to the client
+    // Complete the task
     if (publishToClient) {
       publishToClient({
         type: 'progress',
-        data: { 
-          message: `Converting ${amount} ${fromCurrency} to ${toCurrency}...`,
-          progress: 50
+        data: {
+          message: `Conversion complete!`,
+          progress: 100
         }
       });
     }
@@ -82,14 +80,21 @@ async function convertCurrencyExecutor({
         toCurrency,
         rate,
         equivalentString: `${amount} ${fromCurrency} = ${formattedAmount} ${toCurrency}`,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        lastUpdated: exchangeRateData.time_last_updated
+          ? new Date(exchangeRateData.time_last_updated * 1000).toISOString()
+          : null,
+        provider: exchangeRateData.provider || 'Exchange Rate API'
       }
     });
   } catch (error) {
+    console.error('Currency conversion error:', error);
+
     // Handle errors and return them as a structured JSON response
     return JSON.stringify({
       error: {
         message: error.message || 'Failed to convert currency',
+        details: error.response?.data || null
       }
     });
   }
@@ -117,12 +122,10 @@ const convertCurrencyTool = {
           fromCurrency: {
             type: 'string',
             description: 'The source currency code (e.g., USD, EUR, GBP)',
-            enum: ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR'],
           },
           toCurrency: {
             type: 'string',
             description: 'The target currency code (e.g., USD, EUR, GBP)',
-            enum: ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR'],
           },
         },
         required: ['amount', 'fromCurrency', 'toCurrency'],
