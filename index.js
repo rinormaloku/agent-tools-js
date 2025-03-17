@@ -105,11 +105,11 @@ async function convertCurrencyExecutor({
  * This follows the ToolDefinition interface from @agentframework/core
  */
 const convertCurrencyTool = {
-  name: 'convertCurrency',
+  name: 'convert-currency',
   toolDefinition: {
     type: 'function',
     function: {
-      name: 'convertCurrency',
+      name: 'convert-currency',
       description: 'Convert an amount from one currency to another using current exchange rates',
       strict: true,
       parameters: {
