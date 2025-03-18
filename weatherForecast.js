@@ -137,7 +137,7 @@ const weatherForecastTool = {
             default: 'metric'
           }
         },
-        required: ['location'],
+        required: ['location', 'units'],
         additionalProperties: false,
       },
     },
