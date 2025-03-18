@@ -26,14 +26,32 @@ async function weatherForecastExecutor({
       });
     }
 
-    // Use OpenWeatherMap API for weather data
-    // Note: You should replace this with your own API key in production
-    const API_KEY = 'YOUR_OPENWEATHERMAP_API_KEY';
-    const response = await axios.get(`https://api.openweathermap.org/data/2.5/weather`, {
+    // First, get coordinates for the location using geocoding API
+    const geocodeResponse = await axios.get(`https://geocoding-api.open-meteo.com/v1/search`, {
       params: {
-        q: location,
-        units: units,
-        appid: API_KEY
+        name: location,
+        count: 1,
+        language: 'en',
+        format: 'json'
+      }
+    });
+
+    if (!geocodeResponse.data.results || geocodeResponse.data.results.length === 0) {
+      throw new Error(`Location "${location}" not found`);
+    }
+
+    const locationData = geocodeResponse.data.results[0];
+    const { latitude, longitude, name, country_code } = locationData;
+
+    // Use Open-Meteo API for weather data - no API key required
+    const response = await axios.get(`https://api.open-meteo.com/v1/forecast`, {
+      params: {
+        latitude: latitude,
+        longitude: longitude,
+        current: 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,cloud_cover',
+        temperature_unit: units === 'metric' ? 'celsius' : 'fahrenheit',
+        wind_speed_unit: units === 'metric' ? 'ms' : 'mph',
+        timezone: 'auto'
       }
     });
 
@@ -50,29 +68,54 @@ async function weatherForecastExecutor({
       });
     }
 
+    // Convert weather code to description and icon
+    const weatherCodeMap = {
+      0: { description: 'Clear sky', icon: '01d' },
+      1: { description: 'Mainly clear', icon: '02d' },
+      2: { description: 'Partly cloudy', icon: '03d' },
+      3: { description: 'Overcast', icon: '04d' },
+      45: { description: 'Fog', icon: '50d' },
+      48: { description: 'Depositing rime fog', icon: '50d' },
+      51: { description: 'Light drizzle', icon: '09d' },
+      53: { description: 'Moderate drizzle', icon: '09d' },
+      55: { description: 'Dense drizzle', icon: '09d' },
+      61: { description: 'Slight rain', icon: '10d' },
+      63: { description: 'Moderate rain', icon: '10d' },
+      65: { description: 'Heavy rain', icon: '10d' },
+      71: { description: 'Slight snow fall', icon: '13d' },
+      73: { description: 'Moderate snow fall', icon: '13d' },
+      75: { description: 'Heavy snow fall', icon: '13d' },
+      95: { description: 'Thunderstorm', icon: '11d' },
+      96: { description: 'Thunderstorm with slight hail', icon: '11d' },
+      99: { description: 'Thunderstorm with heavy hail', icon: '11d' }
+    };
+
+    const weatherInfo = weatherCodeMap[weatherData.current.weather_code] ||
+      { description: 'Unknown', icon: '03d' };
+
     // Format the weather data for easier consumption
     const formattedData = {
       location: {
-        name: weatherData.name,
-        country: weatherData.sys.country,
+        name: name,
+        country: country_code,
         coordinates: {
-          lat: weatherData.coord.lat,
-          lon: weatherData.coord.lon
+          lat: latitude,
+          lon: longitude
         }
       },
       current: {
-        temperature: weatherData.main.temp,
-        feels_like: weatherData.main.feels_like,
-        humidity: weatherData.main.humidity,
-        pressure: weatherData.main.pressure,
-        description: weatherData.weather[0].description,
-        icon: weatherData.weather[0].icon,
+        temperature: weatherData.current.temperature_2m,
+        feels_like: weatherData.current.apparent_temperature,
+        humidity: weatherData.current.relative_humidity_2m,
+        pressure: weatherData.current.pressure_msl,
+        description: weatherInfo.description,
+        icon: weatherInfo.icon,
         wind: {
-          speed: weatherData.wind.speed,
-          direction: weatherData.wind.deg
+          speed: weatherData.current.wind_speed_10m,
+          direction: weatherData.current.wind_direction_10m
         },
-        cloudiness: weatherData.clouds.all,
-        timestamp: new Date(weatherData.dt * 1000).toISOString()
+        cloudiness: weatherData.current.cloud_cover,
+        timestamp: weatherData.current.time
       },
       units: units === 'metric' ? {
         temperature: '°C',

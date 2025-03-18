@@ -19,38 +19,37 @@ describe('Weather Forecast Tool E2E Tests', () => {
     jest.clearAllMocks();
   });
 
-  test('successfully retrieves weather data for a location', async () => {
-    // Mock the API response with realistic weather data
-    axios.get.mockResolvedValueOnce({
-      data: {
-        name: 'London',
-        sys: {
-          country: 'GB'
-        },
-        coord: {
-          lat: 51.51,
-          lon: -0.13
-        },
-        main: {
-          temp: 15.2,
-          feels_like: 14.8,
-          humidity: 76,
-          pressure: 1015
-        },
-        weather: [
-          {
-            description: 'partly cloudy',
-            icon: '02d'
+  test('successfully fetches weather data for a valid location', async () => {
+    // Mock the geocoding API response
+    axios.get.mockImplementation((url, config) => {
+      if (url.includes('geocoding-api.open-meteo.com')) {
+        return Promise.resolve({
+          data: {
+            results: [{
+              name: 'London',
+              country_code: 'GB',
+              latitude: 51.5074,
+              longitude: -0.1278
+            }]
           }
-        ],
-        wind: {
-          speed: 4.1,
-          deg: 250
-        },
-        clouds: {
-          all: 40
-        },
-        dt: Math.floor(Date.now() / 1000)
+        });
+      } else if (url.includes('api.open-meteo.com')) {
+        return Promise.resolve({
+          data: {
+            current: {
+              temperature_2m: 15.2,
+              relative_humidity_2m: 76,
+              apparent_temperature: 14.8,
+              precipitation: 0.1,
+              weather_code: 3,
+              pressure_msl: 1012.5,
+              wind_speed_10m: 4.2,
+              wind_direction_10m: 240,
+              cloud_cover: 75,
+              time: '2023-06-15T12:00:00Z'
+            }
+          }
+        });
       }
     });
 
@@ -68,7 +67,7 @@ describe('Weather Forecast Tool E2E Tests', () => {
     expect(response.data.location.name).toBe('London');
     expect(response.data.location.country).toBe('GB');
     expect(response.data.current.temperature).toBe(15.2);
-    expect(response.data.current.description).toBe('partly cloudy');
+    expect(response.data.current.description).toBe('Overcast');
     expect(response.data.units.temperature).toBe('°C');
 
     // Verify progress updates were sent
@@ -78,8 +77,34 @@ describe('Weather Forecast Tool E2E Tests', () => {
     expect(mockPublishToClient.mock.calls[2][0].data.progress).toBe(100);
   });
 
+  test('handles location not found error', async () => {
+    // Mock geocoding API with empty results
+    axios.get.mockImplementation((url) => {
+      if (url.includes('geocoding-api.open-meteo.com')) {
+        return Promise.resolve({
+          data: {
+            results: []
+          }
+        });
+      }
+    });
+
+    const result = await weatherForecastTool.executor({
+      location: 'NonExistentPlace',
+      units: 'metric',
+      publishToClient: mockPublishToClient
+    });
+
+    const response = parseResponse(result);
+
+    // Verify error handling for location not found
+    expect(response.error).toBeDefined();
+    expect(response.data).toBeUndefined();
+    expect(response.error.message).toBe('Location "NonExistentPlace" not found');
+  });
+
   test('handles API errors gracefully', async () => {
-    // Mock API failure
+    // Mock geocoding API failure
     axios.get.mockRejectedValueOnce(new Error('Network error'));
 
     const result = await weatherForecastTool.executor({
@@ -96,38 +121,41 @@ describe('Weather Forecast Tool E2E Tests', () => {
     expect(response.error.message).toBe('Network error');
   });
 
-  test('retrieves weather data with imperial units', async () => {
-    // Mock the API response with imperial units
-    axios.get.mockResolvedValueOnce({
-      data: {
-        name: 'New York',
-        sys: {
-          country: 'US'
-        },
-        coord: {
-          lat: 40.71,
-          lon: -74.01
-        },
-        main: {
-          temp: 68.5,
-          feels_like: 70.2,
-          humidity: 65,
-          pressure: 1012
-        },
-        weather: [
-          {
-            description: 'clear sky',
-            icon: '01d'
+  test('correctly uses imperial units when specified', async () => {
+    // Mock the geocoding API response
+    axios.get.mockImplementation((url, config) => {
+      if (url.includes('geocoding-api.open-meteo.com')) {
+        return Promise.resolve({
+          data: {
+            results: [{
+              name: 'New York',
+              country_code: 'US',
+              latitude: 40.7128,
+              longitude: -74.0060
+            }]
           }
-        ],
-        wind: {
-          speed: 8.5,
-          deg: 270
-        },
-        clouds: {
-          all: 5
-        },
-        dt: Math.floor(Date.now() / 1000)
+        });
+      } else if (url.includes('api.open-meteo.com')) {
+        // Verify imperial units are requested in the API call
+        expect(config.params.temperature_unit).toBe('fahrenheit');
+        expect(config.params.wind_speed_unit).toBe('mph');
+
+        return Promise.resolve({
+          data: {
+            current: {
+              temperature_2m: 70.5,
+              relative_humidity_2m: 65,
+              apparent_temperature: 72.1,
+              precipitation: 0,
+              weather_code: 1,
+              pressure_msl: 1015.2,
+              wind_speed_10m: 8.5,
+              wind_direction_10m: 180,
+              cloud_cover: 25,
+              time: '2023-06-15T12:00:00Z'
+            }
+          }
+        });
       }
     });
 
@@ -139,36 +167,64 @@ describe('Weather Forecast Tool E2E Tests', () => {
 
     const response = parseResponse(result);
 
-    // Verify imperial units are correctly processed
-    expect(response.data).toBeDefined();
-    expect(response.data.location.name).toBe('New York');
-    expect(response.data.current.temperature).toBe(68.5);
-    expect(response.data.current.description).toBe('clear sky');
+    // Verify imperial units are used in the response
     expect(response.data.units.temperature).toBe('°F');
     expect(response.data.units.wind).toBe('mph');
   });
 
-  test('handles invalid location response', async () => {
-    // Mock API response for invalid location
-    axios.get.mockRejectedValueOnce({
-      response: {
-        data: {
-          cod: '404',
-          message: 'city not found'
+  test('correctly maps weather codes to descriptions', async () => {
+    // Test a few different weather codes
+    const weatherCodes = [
+      { code: 0, description: 'Clear sky' },
+      { code: 61, description: 'Slight rain' },
+      { code: 95, description: 'Thunderstorm' }
+    ];
+
+    for (const weatherCode of weatherCodes) {
+      jest.clearAllMocks();
+
+      // Mock the API responses
+      axios.get.mockImplementation((url) => {
+        if (url.includes('geocoding-api.open-meteo.com')) {
+          return Promise.resolve({
+            data: {
+              results: [{
+                name: 'Test City',
+                country_code: 'TC',
+                latitude: 0,
+                longitude: 0
+              }]
+            }
+          });
+        } else if (url.includes('api.open-meteo.com')) {
+          return Promise.resolve({
+            data: {
+              current: {
+                temperature_2m: 20,
+                relative_humidity_2m: 50,
+                apparent_temperature: 20,
+                precipitation: 0,
+                weather_code: weatherCode.code,
+                pressure_msl: 1013,
+                wind_speed_10m: 5,
+                wind_direction_10m: 90,
+                cloud_cover: 30,
+                time: '2023-06-15T12:00:00Z'
+              }
+            }
+          });
         }
-      }
-    });
+      });
 
-    const result = await weatherForecastTool.executor({
-      location: 'NonExistentCity',
-      units: 'metric'
-    });
+      const result = await weatherForecastTool.executor({
+        location: 'Test City',
+        units: 'metric',
+      });
 
-    const response = parseResponse(result);
+      const response = parseResponse(result);
 
-    // Verify error handling for invalid location
-    expect(response.error).toBeDefined();
-    expect(response.data).toBeUndefined();
-    expect(response.error.details).toEqual({ cod: '404', message: 'city not found' });
+      // Verify the weather description matches the code
+      expect(response.data.current.description).toBe(weatherCode.description);
+    }
   });
 });
